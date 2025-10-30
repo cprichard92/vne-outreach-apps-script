@@ -65,7 +65,7 @@ function sendOutreachToEligibleRows(sheet, colIndex, apiKey, limit)
       if (insightMode !== 'primary') appendActionNote(sheet, rowIndex, colIndex, 'Insight fallback used: ' + insightMode);
 
       const repNotes = generateRepTargetingNotes(apiKey, business, establishmentType, insight);
-      const btgNotes = generateBTGOpportunityNotes(apiKey, business, establishmentType);
+      const btgNotes = generateBTGOpportunityNotes(apiKey, business, establishmentType, insight);
 
       const  subject, html  = generateEmailWithMode_(apiKey, 
         business, insight, establishmentType, isFollowUp: eligibleFollowUp
