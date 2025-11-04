@@ -16,22 +16,6 @@ const BTG_INTEREST_STOPWORDS = new Set([
   'wines'
 ]);
 
-const BTG_SEASON_TRENDS = {
-  spring: 'SevenFifty Daily notes spring patio programs leaning into chilled whites, rosé, and spritz-friendly pours—perfect icebreaker material.',
-  summer: 'NielsenIQ\'s patio recap shows summer guests trading up for bubbles and citrus-driven whites; lean into that upgrade talk.',
-  fall: 'Wine Market Council highlights richer Rhône blends and structured reds driving fall menus—frame pours around hearty pairings.',
-  winter: 'WSWA holiday insights show bold reds and fortified BTG pours lifting winter check averages—prime conversation starters.'
-};
-
-const BTG_COLOR_TRENDS = {
-  sparkling: (wine) => `Sparkling by-the-glass keeps double-digit momentum (NielsenIQ); lead with ${formatBTGWineHighlight_(wine)} as the celebratory pour.`,
-  rose: (wine) => `SevenFifty Daily still pegs dry rosé as the patio go-to—${formatBTGWineHighlight_(wine)} is ready for that conversation.`,
-  white: (wine) => `Wine Enthusiast trade briefs see crisp whites driving seafood pairings; position ${formatBTGWineHighlight_(wine)} accordingly.`,
-  red: (wine) => `Punch 2024 spotlights chillable reds and lighter styles as BTG wins—${formatBTGWineHighlight_(wine)} fits that narrative.`,
-  orange: (wine) => `Wine & Spirits continues to feature skin-contact flights; ${formatBTGWineHighlight_(wine)} scratches that itch for adventurous guests.`,
-  dessert: (wine) => `Forbes holiday coverage shows sweet/fortified pours boosting check averages—${formatBTGWineHighlight_(wine)} closes the meal nicely.`
-};
-
 function generateBTGOpportunityNotes(apiKey, business, establishmentType, venueInsight) {
   const typeLower = (establishmentType || '').toLowerCase();
 
@@ -65,38 +49,20 @@ function generateBTGOpportunityNotes(apiKey, business, establishmentType, venueI
       .map((wine) => scoreWineForVenue_(wine, multiplier, normalizedInsight, styleSignals, interestTokens, targetGlass))
       .filter(Boolean);
 
-    let usedFallback = false;
-    let top = [];
-
-    if (scored.length) {
-      top = scored
-        .sort((a, b) => {
-          if (b.score !== a.score) return b.score - a.score;
-          if (a.targetDiff !== b.targetDiff) return a.targetDiff - b.targetDiff;
-          if (b.matchWeight !== a.matchWeight) return b.matchWeight - a.matchWeight;
-          return a.wholesale - b.wholesale;
-        })
-        .slice(0, 3);
-    } else {
-      top = buildFallbackBTGEntries_(wines, multiplier, targetGlass).slice(0, 3);
-      usedFallback = top.length > 0;
-      if (!top.length) {
-        const guidanceOnly = generateBTGTrendGuidance_([], styleSignals, interestTokens, true);
-        let pending = 'BTG candidates pending - check Wine Database.';
-        if (guidanceOnly.length) {
-          pending += `\n**Trend cues & openers:**`;
-          guidanceOnly.forEach((line) => {
-            pending += `\n- ${line}`;
-          });
-        }
-        return normalizeAsciiPunctuation(pending);
-      }
+    if (!scored.length) {
+      return 'BTG candidates pending - check Wine Database.';
     }
+
+    const top = scored
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (a.targetDiff !== b.targetDiff) return a.targetDiff - b.targetDiff;
+        if (b.matchWeight !== a.matchWeight) return b.matchWeight - a.matchWeight;
+        return a.wholesale - b.wholesale;
+      })
+      .slice(0, 3);
 
     let notes = `**BTG Opportunities** (${DEFAULT_POUR_OZ}oz pours, ~${POURS_PER_BOTTLE.toFixed(0)} per bottle):`;
-    if (usedFallback) {
-      notes += `\n_Preliminary picks surfaced by pricing fit; review for local resonance._`;
-    }
 
     top.forEach((entry, idx) => {
       notes += `\n${idx + 1}. **${entry.wine.wine}** (${entry.wine.varietal || 'N/A'}, ${entry.wine.region || 'N/A'})`;
@@ -110,14 +76,6 @@ function generateBTGOpportunityNotes(apiKey, business, establishmentType, venueI
         notes += `\n      - Match: ${entry.reasons.join('; ')}`;
       }
     });
-
-    const trendGuidance = generateBTGTrendGuidance_(top, styleSignals, interestTokens, usedFallback);
-    if (trendGuidance.length) {
-      notes += `\n**Trend cues & openers:**`;
-      trendGuidance.forEach((line) => {
-        notes += `\n- ${line}`;
-      });
-    }
 
     notes += `\n**Venue Type:** ${establishmentType || 'establishment'} (${multiplier}x multiplier)`;
     notes += `\n**Source:** VNE Wine Database, industry standard BTG pricing (${formatDateISO(new Date()).split('T')[0]})`;
@@ -359,177 +317,4 @@ function findProminentToken_(normalizedText) {
 function formatReasonToken_(token) {
   if (!token) return token;
   return token.charAt(0).toUpperCase() + token.slice(1);
-}
-
-function buildFallbackBTGEntries_(wines, multiplier, targetGlass) {
-  return (wines || [])
-    .map((wine) => {
-      const wholesale = parseFloat(wine.price || 0);
-      if (!Number.isFinite(wholesale) || wholesale <= 0 || wholesale >= 50) return null;
-      const btgPrice = wholesale * multiplier / POURS_PER_BOTTLE;
-      const bottleRetail = wholesale * multiplier;
-      const margin = (((multiplier - 1) / multiplier) * 100).toFixed(0);
-      const targetDiff = Math.abs(btgPrice - targetGlass);
-      return {
-        wine,
-        wholesale,
-        btgPrice,
-        bottleRetail,
-        margin,
-        score: 0,
-        matchWeight: 0,
-        targetDiff,
-        reasons: ['Seasonal BTG fit from core portfolio'],
-        tastingNotes: wine.tasting_notes ? wine.tasting_notes : ''
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      if (a.targetDiff !== b.targetDiff) return a.targetDiff - b.targetDiff;
-      return a.wholesale - b.wholesale;
-    });
-}
-
-function generateBTGTrendGuidance_(entries, styleSignals, interestTokens, usedFallback) {
-  const guidance = [];
-  const season = determineCurrentSeason_();
-  if (BTG_SEASON_TRENDS[season]) guidance.push(BTG_SEASON_TRENDS[season]);
-
-  if (styleSignals && styleSignals.length) {
-    const labels = uniq_(styleSignals.map((s) => s.label).filter(Boolean));
-    if (labels.length) {
-      let phrasing = labels[0];
-      if (labels.length === 2) {
-        phrasing = labels.join(' & ');
-      } else if (labels.length > 2) {
-        phrasing = labels.slice(0, 2).join(', ') + ', etc.';
-      }
-      guidance.push(`Guests already flag interest in ${phrasing}—SevenFifty Daily and GuildSomm both call those must-have BTG styles this year.`);
-    }
-  }
-
-  const seenColors = [];
-  entries.forEach((entry) => {
-    const color = categorizeWineColor_(entry.wine);
-    if (color && !seenColors.includes(color)) seenColors.push(color);
-  });
-
-  seenColors.forEach((color) => {
-    const builder = BTG_COLOR_TRENDS[color];
-    const highlight = entries.find((entry) => categorizeWineColor_(entry.wine) === color);
-    if (builder && highlight) guidance.push(builder(highlight.wine));
-  });
-
-  const sweetnessCue = summarizeSweetnessCue_(entries);
-  if (sweetnessCue) guidance.push(sweetnessCue);
-
-  const regionCue = summarizeRegionCue_(entries);
-  if (regionCue) guidance.push(regionCue);
-
-  const varietalCue = summarizeVarietalCue_(entries);
-  if (varietalCue) guidance.push(varietalCue);
-
-  const interestCue = summarizeInterestTokenCue_(interestTokens, entries);
-  if (interestCue) guidance.push(interestCue);
-
-  if (usedFallback) {
-    guidance.push('Start with these pricing-aligned pours while we gather deeper menu cues—easy openers for the first conversation.');
-  }
-
-  return uniq_(guidance.filter(Boolean)).slice(0, 5);
-}
-
-function summarizeSweetnessCue_(entries) {
-  let sweetHighlight = null;
-  let offDryHighlight = null;
-  let dryHighlight = null;
-
-  entries.forEach((entry) => {
-    const text = `${entry.wine.tasting_notes || ''} ${entry.wine.wine || ''} ${entry.wine.varietal || ''}`.toLowerCase();
-    if (!sweetHighlight && /(ice wine|late harvest|dessert|sweet|vin santo|port|sherry|sauternes|moscato)/.test(text)) {
-      sweetHighlight = entry.wine;
-    }
-    if (!offDryHighlight && /(off[-\s]?dry|semi[-\s]?dry|semi[-\s]?sweet|kabinett|spatlese|spätlese)/.test(text)) {
-      offDryHighlight = entry.wine;
-    }
-    if (!dryHighlight && /(\bdry\b|brut|extra dry|bone-dry|crisp|mineral)/.test(text)) {
-      dryHighlight = entry.wine;
-    }
-  });
-
-  if (sweetHighlight) {
-    return `Forbes and Beverage Media flag sweeter finishes as check boosters—${formatBTGWineHighlight_(sweetHighlight)} is an easy dessert upsell.`;
-  }
-  if (offDryHighlight) {
-    return `Sommelier Business notes off-dry BTG options winning with spicy cuisine—frame ${formatBTGWineHighlight_(offDryHighlight)} that way.`;
-  }
-  if (dryHighlight) {
-    return `GuildSomm reports continued demand for bone-dry, mineral wines—underline the precision on ${formatBTGWineHighlight_(dryHighlight)}.`;
-  }
-  return '';
-}
-
-function summarizeRegionCue_(entries) {
-  const regions = uniq_((entries || []).map((entry) => (entry.wine.region || '').trim()).filter(Boolean));
-  if (!regions.length) return '';
-  const highlight = regions.slice(0, 2).join(' & ');
-  return `Wine Market Council says provenance storytelling closes BTG placements—spotlight ${highlight} heritage.`;
-}
-
-function summarizeVarietalCue_(entries) {
-  const varietals = uniq_((entries || []).map((entry) => (entry.wine.varietal || '').trim()).filter(Boolean));
-  if (!varietals.length) return '';
-  const highlight = varietals.slice(0, 3).join(', ');
-  return `SevenFifty Daily's BTG roundups call ${highlight} steady movers—share that we can rotate them in immediately.`;
-}
-
-function summarizeInterestTokenCue_(interestTokens, entries) {
-  if (!interestTokens || !interestTokens.size) return '';
-  const token = Array.from(interestTokens).find((t) => t && t.length >= 5);
-  if (!token) return '';
-  const normalizedToken = normalizeForBTGMatch_(token);
-  if (!normalizedToken) return '';
-  const matched = (entries || []).find((entry) => {
-    const normalizedVarietal = normalizeForBTGMatch_(entry.wine.varietal || '');
-    const normalizedRegion = normalizeForBTGMatch_(entry.wine.region || '');
-    return (normalizedVarietal && normalizedVarietal.includes(normalizedToken)) ||
-           (normalizedRegion && normalizedRegion.includes(normalizedToken));
-  });
-  if (matched) {
-    return `Digital chatter around ${formatReasonToken_(token)} keeps climbing—${formatBTGWineHighlight_(matched.wine)} lets reps jump on that trend.`;
-  }
-  return `Digital chatter around ${formatReasonToken_(token)} keeps climbing—mention we already cover it by the glass.`;
-}
-
-function categorizeWineColor_(wine) {
-  if (!wine) return '';
-  const text = `${wine.varietal || ''} ${wine.wine || ''}`.toLowerCase();
-  const notes = (wine.tasting_notes || '').toLowerCase();
-  if (/sparkling|prosecco|cava|champagne|franciacorta|pet[-\s]?nat|bubbles|lambrusco|brut/.test(text)) return 'sparkling';
-  if (/ros[eé]|rosado|blush/.test(text)) return 'rose';
-  if (/orange|skin[-\s]?contact|amber/.test(text)) return 'orange';
-  if (/port|sherry|madeira|late harvest|dessert|vin santo|sauternes|tokaji|ice wine|moscat(o|el)/.test(text + ' ' + notes)) return 'dessert';
-  if (/(cabernet|merlot|pinot noir|syrah|shiraz|malbec|grenache|tempranillo|sangiovese|nebbiolo|zinfandel|gamay|mourv[eè]dre|cinsault|barbera|dolcetto|petite sirah|tannat|bordeaux|rouge|nero|montepulciano|primitivo|lagrein)/.test(text)) return 'red';
-  if (/(sauvignon blanc|pinot gris|pinot grigio|riesling|albari|viognier|chardonnay|chenin|gruner|fiano|garganega|godello|roussanne|marsanne|muscat|moscat(o|el)|arinto|assyrtiko|greco|vermentino|trebbiano|soave|txakolina|albarino|white|bianco)/.test(text)) return 'white';
-  if (/tannin|blackberry|plum|cocoa|spice/.test(notes)) return 'red';
-  if (/citrus|stone|mineral|floral|pear|apple|tropical|zesty|crisp/.test(notes)) return 'white';
-  return '';
-}
-
-function formatBTGWineHighlight_(wine) {
-  if (!wine) return 'this selection';
-  const varietal = (wine.varietal || '').trim();
-  const region = (wine.region || '').trim();
-  if (varietal && region) return `our ${varietal} from ${region}`;
-  if (varietal) return `our ${varietal}`;
-  if (region) return `our ${region} selection`;
-  return wine.wine || 'this selection';
-}
-
-function determineCurrentSeason_() {
-  const month = (new Date().getMonth() + 1);
-  if (month >= 3 && month <= 5) return 'spring';
-  if (month >= 6 && month <= 8) return 'summer';
-  if (month >= 9 && month <= 11) return 'fall';
-  return 'winter';
 }
