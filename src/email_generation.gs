@@ -40,6 +40,8 @@ function buildEmailGenerationPrompt(ctx)
   return `
   Write a crisp, professional B2B sales email for Vin Noir Explorers and Importers (VNE Importers) to a buyer at $business (a $establishmentType).
 
+  CRITICAL VOICE: Write entirely in first person, as if I am the sender representing VNE Importers. Use "I" and "my" statements, not "we" or "our".
+
   CRITICAL: Use proper UTF-8 encoding. Convert all special characters correctly (é, ñ, ú, etc.).
 
   STRUCTURE (natural flow, avoid run-ons):
@@ -48,34 +50,35 @@ function buildEmailGenerationPrompt(ctx)
 
   2. OPENING (2-3 short paragraphs):
     - Para 1: "$insight" (use verbatim)
-    - Para 2: $isFollowUp ? ""Following up on our earlier note—we know schedules get packed and wanted to make this easy."" : ""We're reaching out because we think our portfolio could complement what you offer at ' + business + '.""
+    - Para 2: $isFollowUp ? ""I'm following up on my earlier note—I know schedules get packed and wanted to make this easy."" : ""I'm reaching out because I believe my portfolio could complement what you offer at ' + business + '.""
     - Para 3 (if needed): Brief natural transition
 
   3. COMPANY INTRO (single paragraph):
-    "We're <a href="$site">Vin Noir Explorers and Importers</a>, the only Black-owned wine importer and wholesaler specializing in small-batch, family-owned wines from Argentina, Chile, Italy, Spain, Switzerland, and the U.S. (Read more about us in <a href="$article">USA Wine Ratings</a>.) We handle all deliveries and logistics so you can focus on what matters most."
+    "I'm with <a href="$site">Vin Noir Explorers and Importers</a>, the only Black-owned wine importer and wholesaler specializing in small-batch, family-owned wines from Argentina, Chile, Italy, Spain, Switzerland, and the U.S. (You can read more about us in <a href="$article">USA Wine Ratings</a>.) I personally coordinate deliveries and logistics so you can focus on what matters most."
 
   4. VALUE PROPS (clean bullets):
-    <strong>What we can do for $business:</strong>
+    <strong>What I can do for $business:</strong>
     <ul style="margin-top:8px;">
-      <li>Curate wines that fit your program and price points</li>
-      <li>Handle deliveries and logistics seamlessly</li>
-      <li>Provide staff education and private tasting events</li>
+      <li>I curate wines that fit your program and price points</li>
+      <li>I track down bottles you've poured before—even if distributors no longer carry them—so my importing team can source them for you directly</li>
+      <li>I handle deliveries and logistics seamlessly</li>
+      <li>I provide staff education and private tasting events</li>
     </ul>
 
   5. NEXT STEPS (clean bullets):
     <strong>Getting started is easy:</strong>
     <ul style="margin-top:8px;">
-      <li>Browse our <a href="$specUrl">portfolio and spec sheets</a> — submit orders directly from the sheet</li>
-      <li>Book a <a href="$bookingUrl">15-minute intro call</a> at your convenience</li>
-      <li>Reply to this email or text us at <strong>$phone</strong></li>
+      <li>Browse my <a href="$specUrl">portfolio and spec sheets</a> — submit orders directly from the sheet</li>
+      <li>Book a <a href="$bookingUrl">15-minute intro call</a> with me at your convenience</li>
+      <li>Reply to this email or text me at <strong>$phone</strong></li>
     </ul>
 
   6. PAYMENT INFO (single paragraph):
-    "We make purchasing convenient—pay by invoice, credit card, check, or FinTech. If you'd like to use FinTech, just let us know your business name and location, and we'll send a connection request."
+    "I make purchasing convenient—pay by invoice, credit card, check, or FinTech. If you'd like to use FinTech, just let me know your business name and location, and I'll send a connection request."
 
   7. SIGNATURE:
     <p style="margin-top:16px;">Looking forward to connecting,<br>
-    <strong>Vin Noir Explorers and Importers</strong><br>
+    <strong>Vanessa – VNE Importers</strong><br>
     <a href="mailto:$email">$email</a> | <a href="tel:$phone">$phone</a> | <a href="$site">vneimporters.com</a></p>
     
     <p style="margin-top:8px;">
@@ -110,31 +113,32 @@ function buildEmailGenerationPrompt(ctx)
 
     const fallbackHtml = `
       <p>$greeting</p>
-      
-      <p>$insight || 'We reviewed your establishment and were impressed by your commitment to quality.'</p>
-      
-      <p>We're reaching out because we think our portfolio could complement what you offer at $business || 'your establishment'.</p>
-      
-      <p>We're <a href="$VNE_SITE">Vin Noir Explorers and Importers</a>, the only Black-owned wine importer and wholesaler specializing in small-batch, family-owned wines from Argentina, Chile, Italy, Spain, Switzerland, and the U.S. (Read more about us in <a href="$USA_WINE_ARTICLE">USA Wine Ratings</a>.) We handle all deliveries and logistics so you can focus on what matters most.</p>
-      
-      <strong>What we can do for $business || 'you':</strong>
+
+      <p>$insight || 'I reviewed your program and was impressed by your commitment to quality.'</p>
+
+      <p>I'm reaching out because I believe my portfolio could complement what you offer at $business || 'your establishment'.</p>
+
+      <p>I'm with <a href="$VNE_SITE">Vin Noir Explorers and Importers</a>, the only Black-owned wine importer and wholesaler specializing in small-batch, family-owned wines from Argentina, Chile, Italy, Spain, Switzerland, and the U.S. (You can read more about us in <a href="$USA_WINE_ARTICLE">USA Wine Ratings</a>.) I personally coordinate deliveries and logistics so you can focus on what matters most.</p>
+
+      <strong>What I can do for $business || 'you':</strong>
       <ul style="margin-top:8px;">
-        <li>Curate wines that fit your program and price points</li>
-        <li>Handle deliveries and logistics seamlessly</li>
-        <li>Provide staff education and private tasting events</li>
+        <li>I curate wines that fit your program and price points</li>
+        <li>I track down bottles you've poured before—even if distributors no longer carry them—so my importing team can source them for you directly</li>
+        <li>I handle deliveries and logistics seamlessly</li>
+        <li>I provide staff education and private tasting events</li>
       </ul>
-      
+
       <strong>Getting started is easy:</strong>
       <ul style="margin-top:8px;">
-        <li>Browse our <a href="$SPEC_SHEET_URL">portfolio and spec sheets</a> — submit orders directly from the sheet</li>
-        <li>Book a <a href="$BOOKING_URL">15-minute intro call</a> at your convenience</li>
-        <li>Reply to this email or text us at <strong>$VNE_PHONE</strong></li>
+        <li>Browse my <a href="$SPEC_SHEET_URL">portfolio and spec sheets</a> — submit orders directly from the sheet</li>
+        <li>Book a <a href="$BOOKING_URL">15-minute intro call</a> with me at your convenience</li>
+        <li>Reply to this email or text me at <strong>$VNE_PHONE</strong></li>
       </ul>
-      
-      <p>We make purchasing convenient—pay by invoice, credit card, check, or FinTech. If you'd like to use FinTech, just let us know your business name and location, and we'll send a connection request.</p>
-      
+
+      <p>I make purchasing convenient—pay by invoice, credit card, check, or FinTech. If you'd like to use FinTech, just let me know your business name and location, and I'll send a connection request.</p>
+
       <p style="margin-top:16px;">Looking forward to connecting,<br>
-      <strong>Vin Noir Explorers and Importers</strong><br>
+      <strong>Vanessa – VNE Importers</strong><br>
       <a href="mailto:$VNE_EMAIL">$VNE_EMAIL</a> | <a href="tel:$VNE_PHONE">$VNE_PHONE</a> | <a href="$VNE_SITE">vneimporters.com</a></p>
       
       <p style="margin-top:8px;">

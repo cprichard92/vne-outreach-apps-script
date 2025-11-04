@@ -73,7 +73,7 @@ function test_NewCompanies_EndToEnd()
       if (insightMode !== 'primary') appendActionNote(sheet, rowIndex, colIndex, 'TEST insight fallback: ' + insightMode);
 
       const repNotes = generateRepTargetingNotes(apiKey, business, establishmentType, insight);
-      const btgNotes = generateBTGOpportunityNotes(apiKey, business, establishmentType);
+      const btgNotes = generateBTGOpportunityNotes(apiKey, business, establishmentType, insight);
 
       const  subject, html  = generateEmailWithMode_(apiKey, 
         business, insight, establishmentType, isFollowUp: false
