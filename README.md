@@ -127,7 +127,6 @@ Before merging, we double-check for:
 
 Questions, blockers, or production incidents can be raised with the outreach automation maintainers. Keep the following handy:
 
-* **Operations contact:** outreach@vinnoirexplorers.com (monitored by the sales ops team).
-* **Escalation:** Ping #sales-automation in Slack for urgent fixes.
+* **Operations & Escalation contact:** vneimports@gmail.com (monitored by the dev ops team).
 
 We welcome feedback—whether it is new data sources, copy tweaks, or improvements to bounce recovery logic. Open a PR or reach out through the channels above, and we will collaborate on the next iteration.
