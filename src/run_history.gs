@@ -1,5 +1,5 @@
 /*** RUN HISTORY LOGGING ******************************************************/
-function logRunHistory(added, stats, extraStats, duration) 
+function logRunHistory(added, stats, extraStats, bounceStats, duration)
   try 
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const historySheet = ss.getSheetByName(RUN_HISTORY_SHEET_NAME);
@@ -9,6 +9,10 @@ function logRunHistory(added, stats, extraStats, duration)
     
 
     const strategy = determineStrategy();
+    let notes = 'Duration: ' + duration + 's. Added: ' + added;
+    if (bounceStats && bounceStats.processed)
+      notes += '. Bounce retries: ' + bounceStats.resolved + '/' + bounceStats.processed;
+
     const runData = [
       new Date(),
       strategy.obxQuota, // OBX Leads target
@@ -18,7 +22,7 @@ function logRunHistory(added, stats, extraStats, duration)
       extraStats.extraSent || 0, // Extra Outreach
       stats.errors.length, // Errors
       strategy.reason || 'Standard', // Strategy Active
-      'Duration: ' + duration + 's. Added: ' + added // Notes
+      notes // Notes
     ];
 
     historySheet.appendRow(runData);
