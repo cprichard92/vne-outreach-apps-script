@@ -21,7 +21,10 @@ function vneDailyProactiveRun()
   
   // Outreach to eligible rows
   const stats = sendOutreachToEligibleRows(sheet, colIndex, apiKey, MAX_OUTREACH_PER_RUN);
-  
+
+  // Retry any bounced outreach with enhanced research
+  const bounceStats = processBounceBackRetries(sheet, colIndex, apiKey);
+
   // Check for risk-cleared extra outreach
   const extraStats = sendExtraOutreachForClearedRisks(sheet, colIndex, apiKey);
   
@@ -29,9 +32,9 @@ function vneDailyProactiveRun()
   const duration = ((endTime - startTime) / 1000).toFixed(1);
   
   // Log to Run History
-  logRunHistory(added, stats, extraStats, duration);
-  
+  logRunHistory(added, stats, extraStats, bounceStats, duration);
+
   // Send unified summary
-  sendUnifiedSummary(added, stats, extraStats, startTime, endTime);
+  sendUnifiedSummary(added, stats, extraStats, bounceStats, startTime, endTime);
   
   Logger.log(' Daily run complete in ' + duration + 's');

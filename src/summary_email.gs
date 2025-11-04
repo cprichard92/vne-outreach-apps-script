@@ -1,5 +1,5 @@
 /*** UNIFIED SUMMARY EMAIL ****************************************************/
-function sendUnifiedSummary(added, stats, extraStats, startTime, endTime) 
+function sendUnifiedSummary(added, stats, extraStats, bounceStats, startTime, endTime)
   const strategy = determineStrategy();
   const sheetUrl = 'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/edit';
   const historyUrl = sheetUrl + '#gid=' + getSheetIdByName(RUN_HISTORY_SHEET_NAME);
@@ -26,6 +26,29 @@ function sendUnifiedSummary(added, stats, extraStats, startTime, endTime)
   
   body += 'Total outreach: ' + (stats.sent + extraStats.extraSent) + '';
   body += 'Errors: ' + stats.errors.length + '';
+
+  if (bounceStats && bounceStats.processed > 0) {
+    body += '--- BOUNCE RETRIES ---';
+    body += 'Bounces processed: ' + bounceStats.processed + '';
+    body += 'Successful resent: ' + bounceStats.resolved + '';
+    body += 'Resend attempts: ' + bounceStats.resent + '';
+    body += 'Unresolved: ' + bounceStats.unresolved + '';
+    if (bounceStats.items && bounceStats.items.length) {
+      bounceStats.items.forEach((item, i) => {
+        let line = (i + 1) + '. ';
+        if (item.business) line += item.business + ' ';
+        line += '<' + item.email + '>';
+        if (item.status) line += ' – ' + item.status;
+        if (item.reason) line += ' | ' + item.reason;
+        if (item.searchSummary) line += ' | ' + item.searchSummary;
+        body += line;
+      });
+      body += '';
+    }
+  }
+
+  if (bounceStats && bounceStats.error)
+    body += 'Bounce retry error: ' + bounceStats.error;
   
   if (stats && stats.reasons && (stats.reasons.blackout || stats.reasons.emailQuality)) 
   body += ': ';

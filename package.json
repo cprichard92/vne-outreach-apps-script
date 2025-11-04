@@ -1,0 +1,10 @@
+{
+  "name": "vne-outreach-apps-script",
+  "version": "1.0.0",
+  "description": "VNE outreach Apps Script automation",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
