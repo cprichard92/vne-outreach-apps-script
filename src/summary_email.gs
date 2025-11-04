@@ -27,14 +27,14 @@ function sendUnifiedSummary(added, stats, extraStats, bounceStats, startTime, en
   body += 'Total outreach: ' + (stats.sent + extraStats.extraSent) + '';
   body += 'Errors: ' + stats.errors.length + '';
 
-  if (bounceStats && bounceStats.processed > 0)
+  if (bounceStats && bounceStats.processed > 0) {
     body += '--- BOUNCE RETRIES ---';
     body += 'Bounces processed: ' + bounceStats.processed + '';
     body += 'Successful resent: ' + bounceStats.resolved + '';
     body += 'Resend attempts: ' + bounceStats.resent + '';
     body += 'Unresolved: ' + bounceStats.unresolved + '';
-    if (bounceStats.items && bounceStats.items.length)
-      bounceStats.items.forEach((item, i) =>
+    if (bounceStats.items && bounceStats.items.length) {
+      bounceStats.items.forEach((item, i) => {
         let line = (i + 1) + '. ';
         if (item.business) line += item.business + ' ';
         line += '<' + item.email + '>';
@@ -42,8 +42,10 @@ function sendUnifiedSummary(added, stats, extraStats, bounceStats, startTime, en
         if (item.reason) line += ' | ' + item.reason;
         if (item.searchSummary) line += ' | ' + item.searchSummary;
         body += line;
-      );
+      });
       body += '';
+    }
+  }
 
   if (bounceStats && bounceStats.error)
     body += 'Bounce retry error: ' + bounceStats.error;
