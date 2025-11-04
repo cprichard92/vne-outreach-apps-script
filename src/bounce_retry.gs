@@ -1,5 +1,5 @@
 /*** BOUNCE RETRY HANDLING ****************************************************/
-const BOUNCE_LOOKBACK_HOURS = 168;
+const BOUNCE_LOOKBACK_HOURS = 72;
 const BOUNCE_PROCESSED_LABEL = 'VNE/Bounce-Processed';
 
 function processBounceBackRetries(sheet, colIndex, apiKey) {
@@ -18,108 +18,115 @@ function processBounceBackRetries(sheet, colIndex, apiKey) {
     if (!bounces.length) return stats;
 
     const data = sheet.getDataRange().getValues();
-    const rows = data.slice(1);
-    const emailMap = {};
-    for (let i = 0; i < rows.length; i++) {
-      const emailCell = (getCell(rows[i], colIndex['Email']) || '').toString().trim().toLowerCase();
-      if (!emailCell) continue;
-      emailMap[emailCell] = {
-        row: rows[i],
-        index: i + 2
-      };
+    const emailCol = colIndex['Email'] - 1;
+    const rowMap = {};
+    for (let i = 1; i < data.length; i++) {
+      const email = (data[i][emailCol] || '').toString().trim().toLowerCase();
+      if (email) {
+        rowMap[email] = {
+          values: data[i],
+          rowIndex: i + 1
+        };
+      }
     }
 
     for (let i = 0; i < bounces.length; i++) {
       const bounce = bounces[i];
+      const normalizedEmail = (bounce.email || '').toLowerCase();
       stats.processed++;
+
       const item = {
-        email: bounce.email,
-        reason: bounce.reason || '',
+        email: normalizedEmail,
         business: '',
+        reason: bounce.reason || '',
         status: '',
-        subject: '',
         searchSummary: ''
       };
       stats.items.push(item);
 
-      const match = emailMap[bounce.email];
-      if (!match) {
-        item.status = 'No matching row for bounced email';
+      const rowEntry = rowMap[normalizedEmail];
+      if (!rowEntry) {
+        item.status = 'Email not found on sheet';
         stats.unresolved++;
-        const missingDetail = {
+        stats.details.push({
           business: '',
-          email: bounce.email,
+          email: normalizedEmail,
           source: '',
           status: 'not-in-sheet',
           subject: ''
-        };
-        stats.details.push(missingDetail);
+        });
         continue;
       }
 
-      const rowIndex = match.index;
-      const rowValues = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const rowIndex = rowEntry.rowIndex;
+      const rowValues = rowEntry.values;
       const business = getCell(rowValues, colIndex['Business']) || '';
       const website = getCell(rowValues, colIndex['Website']) || '';
-      const city = getCell(rowValues, colIndex['City']) || '';
-      const state = getCell(rowValues, colIndex['State']) || '';
       item.business = business;
 
-      const reasonNote = bounce.reason ? ' Reason: ' + bounce.reason : '';
-      appendActionNote(sheet, rowIndex, colIndex, 'Bounce detected for ' + bounce.email + '.' + reasonNote + ' Triggering smart contact research.');
+      appendActionNote(sheet, rowIndex, colIndex, 'Bounce detected for ' + normalizedEmail + (item.reason ? ' (' + item.reason + ')' : '') + '.');
 
-      const research = performSmartContactResearch_(business, website, city, state, bounce.email);
-      item.searchSummary = formatSearchSummary_(research.attempts);
-
-      if (research.sources && research.sources.length) {
-        appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry searched: ' + research.sources.join(', '));
-      }
-
-      if (research.bestEmail) {
-        if (research.bestEmail !== bounce.email) {
-          sheet.getRange(rowIndex, colIndex['Email']).setValue(research.bestEmail);
-          appendActionNote(sheet, rowIndex, colIndex, 'Updated email after bounce retry: ' + research.bestEmail + ' (source: ' + research.bestSource + ')');
-        }
-        item.status = 'Found alternate contact: ' + research.bestEmail + ' (source: ' + research.bestSource + ')';
-
-        const sendResult = retryBounceOutreach_(sheet, rowIndex, colIndex, apiKey, research.bestEmail, research.bestSource);
-        stats.resent++;
-        item.subject = sendResult.subject || '';
-
-        const detail = {
-          business: business,
-          email: research.bestEmail,
-          source: research.bestSource || '',
-          status: sendResult.success ? 'resent' : 'send-failed',
-          subject: sendResult.subject || ''
-        };
-        stats.details.push(detail);
-
-        if (sendResult.success) {
-          stats.resolved++;
-          appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry email sent to ' + research.bestEmail + '.');
-        } else {
-          stats.unresolved++;
-          item.status = 'Send failed after finding ' + research.bestEmail + ': ' + sendResult.error;
-          appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry send failed: ' + sendResult.error);
-        }
-      } else {
+      const candidates = buildBounceEmailCandidates_(rowValues, colIndex, website, normalizedEmail);
+      if (!candidates.length) {
+        item.status = 'No alternate contact found';
+        item.searchSummary = 'notes/domain scans';
+        appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry – no alternate contact found after scanning notes and domain guesses.');
         stats.unresolved++;
-        item.status = 'No alternate contact found. Sources searched: ' + research.sources.join(', ');
-        const detail = {
+        stats.details.push({
           business: business,
-          email: bounce.email,
+          email: normalizedEmail,
           source: '',
           status: 'not-found',
           subject: ''
-        };
-        stats.details.push(detail);
-        appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry could not locate a new contact. Sources: ' + research.sources.join(', '));
+        });
+        continue;
       }
+
+      const attemptSummary = [];
+      let resolved = false;
+
+      for (let j = 0; j < candidates.length; j++) {
+        const candidate = candidates[j];
+        attemptSummary.push(candidate.source + ':' + candidate.email);
+
+        const result = retryBounceOutreach_(sheet, rowIndex, colIndex, apiKey, candidate.email, candidate.source, business);
+        stats.resent++;
+
+        if (result.success) {
+          stats.resolved++;
+          item.status = 'Resent to ' + candidate.email + ' (' + candidate.source + ')';
+          stats.details.push({
+            business: business,
+            email: candidate.email,
+            source: candidate.source,
+            status: 'resent',
+            subject: result.subject || ''
+          });
+          rowMap[candidate.email.toLowerCase()] = rowEntry;
+          resolved = true;
+          break;
+        }
+
+        appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry send failed for ' + candidate.email + ': ' + result.error);
+        stats.details.push({
+          business: business,
+          email: candidate.email,
+          source: candidate.source,
+          status: 'send-failed',
+          subject: result.subject || ''
+        });
+      }
+
+      if (!resolved) {
+        item.status = item.status || 'All alternate contacts failed';
+        stats.unresolved++;
+      }
+
+      item.searchSummary = attemptSummary.join('; ');
     }
-  } catch (e) {
-    stats.error = String(e);
-    Logger.log('processBounceBackRetries error: ' + e);
+  } catch (err) {
+    stats.error = String(err);
+    Logger.log('processBounceBackRetries error: ' + err);
   }
 
   return stats;
@@ -130,7 +137,8 @@ function fetchRecentBounceNotifications_() {
   try {
     const label = ensureBounceProcessedLabel_();
     const query = 'from:(mailer-daemon OR postmaster) subject:("Delivery Status Notification" OR "Undelivered Mail Returned to Sender" OR "Mail delivery failed") newer_than:' + BOUNCE_LOOKBACK_HOURS + 'h -label:"' + BOUNCE_PROCESSED_LABEL + '"';
-    const threads = GmailApp.search(query, 0, 50);
+    const threads = GmailApp.search(query, 0, 20);
+
     for (let t = 0; t < threads.length; t++) {
       const thread = threads[t];
       const messages = thread.getMessages();
@@ -140,18 +148,17 @@ function fetchRecentBounceNotifications_() {
         const body = message.getPlainBody() || message.getBody();
         const email = extractBounceRecipientFromBody_(body);
         if (!email) continue;
-        const info = {
+        results.push({
           email: email.toLowerCase(),
           reason: extractBounceReason_(body)
-        };
-        results.push(info);
+        });
         message.addLabel(label);
         message.markRead();
       }
       thread.addLabel(label);
     }
-  } catch (e) {
-    Logger.log('fetchRecentBounceNotifications_ error: ' + e);
+  } catch (err) {
+    Logger.log('fetchRecentBounceNotifications_ error: ' + err);
   }
   return results;
 }
@@ -184,16 +191,6 @@ function extractBounceRecipientFromBody_(text) {
   return '';
 }
 
-function isDeliverableCandidate_(email) {
-  if (!email) return false;
-  const lower = email.toLowerCase();
-  if (lower.includes('mailer-daemon')) return false;
-  if (lower.includes('postmaster')) return false;
-  if (lower === (VNE_EMAIL || '').toLowerCase()) return false;
-  if (lower.endsWith('@gmail.com') && lower.startsWith('no-reply')) return false;
-  return true;
-}
-
 function extractBounceReason_(text) {
   if (!text) return '';
   const lines = text.split(/\r?\n/);
@@ -206,255 +203,112 @@ function extractBounceReason_(text) {
   return '';
 }
 
-function performSmartContactResearch_(business, website, city, state, originalEmail) {
-  const attempts = [];
-  const candidateMap = {};
-  const sourceSet = new Set();
-
-  const normalizedBusiness = (business || '').toString().trim();
-  const normalizedWebsite = normalizeWebsiteUrl_(website);
-  const preferredDomain = extractDomain(normalizedWebsite || originalEmail);
-
-  const targets = buildSearchTargets_(normalizedBusiness, normalizedWebsite, city, state, preferredDomain);
-  for (let i = 0; i < targets.length; i++) {
-    const target = targets[i];
-    if (!target || !target.url) continue;
-
-    const attempt = {
-      source: target.source,
-      url: target.url,
-      status: '',
-      emails: []
-    };
-    sourceSet.add(target.source);
-
-    try {
-      const response = UrlFetchApp.fetch(target.url, {
-        muteHttpExceptions: true,
-        followRedirects: true,
-        timeout: 20000
-      });
-      attempt.status = 'HTTP ' + response.getResponseCode();
-      const body = response.getContentText();
-      const emails = extractEmailsFromText_(body);
-      attempt.emails = emails;
-      for (let j = 0; j < emails.length; j++) {
-        const email = emails[j].toLowerCase();
-        if (email === originalEmail) continue;
-        if (!candidateMap[email]) {
-          candidateMap[email] = {
-            email: email,
-            sources: new Set()
-          };
-        }
-        candidateMap[email].sources.add(target.source);
-      }
-    } catch (err) {
-      attempt.status = 'error: ' + String(err).slice(0, 120);
-    }
-
-    attempts.push(attempt);
-    Utilities.sleep(100);
-  }
-
+function buildBounceEmailCandidates_(rowValues, colIndex, website, bouncedEmail) {
+  const seen = new Set();
+  seen.add((bouncedEmail || '').toLowerCase());
   const candidates = [];
-  Object.keys(candidateMap).forEach(function(key) {
-    const candidate = candidateMap[key];
-    const sourceList = Array.from(candidate.sources || []);
-    candidate.sourceList = sourceList;
-    candidate.score = scoreEmailCandidate_(candidate.email, preferredDomain, normalizedBusiness);
-    candidates.push(candidate);
-  });
 
-  candidates.sort(function(a, b) {
-    return b.score - a.score;
-  });
-
-  const result = {
-    attempts: attempts,
-    candidates: candidates,
-    sources: Array.from(sourceSet),
-    bestEmail: '',
-    bestSource: ''
-  };
-
-  if (candidates.length > 0) {
-    const best = candidates[0];
-    result.bestEmail = best.email;
-    result.bestSource = (best.sourceList || []).join(', ');
+  function addCandidate(email, source) {
+    const normalized = (email || '').toString().trim().toLowerCase();
+    if (!normalized) return;
+    if (seen.has(normalized)) return;
+    if (!isDeliverableCandidate_(normalized)) return;
+    seen.add(normalized);
+    candidates.push({ email: normalized, source: source });
   }
 
-  return result;
-}
+  const textColumns = ['POC', 'Notes', 'Rep Targeting Notes', 'BTG Opportunity Notes', 'Source'];
+  for (let i = 0; i < textColumns.length; i++) {
+    const name = textColumns[i];
+    const col = colIndex[name];
+    if (!col) continue;
+    const value = getCell(rowValues, col);
+    const emails = extractEmailsFromTextForBounce_(value);
+    for (let j = 0; j < emails.length; j++) addCandidate(emails[j], name.toLowerCase());
+  }
 
-function buildSearchTargets_(business, website, city, state, preferredDomain) {
-  const targets = [];
-  const locationParts = [];
-  if (city) locationParts.push(city);
-  if (state) locationParts.push(state);
-  const locationString = locationParts.join(' ');
-  const queryBase = (business + ' ' + locationString).trim();
-
-  if (website) {
-    const base = website.replace(/\/$/, '');
-    addSearchTarget_(targets, 'Website homepage', base);
-    addSearchTarget_(targets, 'Website contact page', base + '/contact');
-    addSearchTarget_(targets, 'Website about page', base + '/about');
-    addSearchTarget_(targets, 'Website team page', base + '/team');
-    addSearchTarget_(targets, 'Website staff page', base + '/staff');
-    if (preferredDomain) {
-      addSearchTarget_(targets, 'Google site email search', 'https://www.google.com/search?q=' + encodeURIComponent('site:' + preferredDomain + ' email'));
+  const domain = extractDomain(website || bouncedEmail);
+  if (domain) {
+    const guesses = ['info', 'contact', 'hello', 'sales', 'beverage', 'gm', 'events'];
+    for (let k = 0; k < guesses.length; k++) {
+      addCandidate(guesses[k] + '@' + domain, 'domain-guess');
     }
   }
 
-  if (queryBase) {
-    const encoded = encodeURIComponent(queryBase + ' contact email');
-    addSearchTarget_(targets, 'Google search', 'https://www.google.com/search?q=' + encoded);
-    addSearchTarget_(targets, 'Bing search', 'https://www.bing.com/search?q=' + encoded);
-    addSearchTarget_(targets, 'DuckDuckGo search', 'https://duckduckgo.com/?q=' + encoded);
-    addSearchTarget_(targets, 'Google phone search', 'https://www.google.com/search?q=' + encodeURIComponent(queryBase + ' phone email'));
-    addSearchTarget_(targets, 'Google staff search', 'https://www.google.com/search?q=' + encodeURIComponent(queryBase + ' beverage director email'));
-    addSearchTarget_(targets, 'LinkedIn search', 'https://www.linkedin.com/search/results/all/?keywords=' + encodeURIComponent(queryBase + ' beverage director email'));
-    addSearchTarget_(targets, 'Facebook search', 'https://www.facebook.com/search/top/?q=' + encodeURIComponent(queryBase));
-    addSearchTarget_(targets, 'Instagram search', 'https://www.instagram.com/web/search/topsearch/?context=blended&query=' + encodeURIComponent(queryBase));
-    addSearchTarget_(targets, 'Twitter search', 'https://nitter.net/search?f=tweets&q=' + encodeURIComponent(queryBase + ' email'));
-    addSearchTarget_(targets, 'Generic email pattern search', 'https://www.google.com/search?q=' + encodeURIComponent(queryBase + ' email format'));
-  }
-
-  return targets;
+  return candidates;
 }
 
-function addSearchTarget_(targets, source, url) {
-  if (!url) return;
-  const trimmed = url.trim();
-  if (!trimmed) return;
-  targets.push({ source: source, url: trimmed });
-}
-
-function normalizeWebsiteUrl_(website) {
-  if (!website) return '';
-  let url = website.toString().trim();
-  if (!url) return '';
-  if (!/^https?:/i.test(url)) url = 'https://' + url;
-  return url.replace(/\/$/, '');
-}
-
-function extractEmailsFromText_(text) {
+function extractEmailsFromTextForBounce_(text) {
   if (!text) return [];
-  const matches = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
-  const unique = new Set();
-  const results = [];
+  const matches = String(text).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+  if (!matches) return [];
+  const out = [];
   for (let i = 0; i < matches.length; i++) {
-    const email = matches[i].toLowerCase();
-    if (!isDeliverableCandidate_(email)) continue;
-    if (unique.has(email)) continue;
-    unique.add(email);
-    results.push(email);
+    out.push(matches[i].toLowerCase());
   }
-  return results;
+  return out;
 }
 
-function scoreEmailCandidate_(email, preferredDomain, business) {
-  let score = 0;
-  const domain = extractDomain(email);
-  if (preferredDomain && domain === preferredDomain) score += 5;
-  if (domain && !FREE_DOMAINS.has(domain)) score += 2;
-  if (/owner@|buyer@|beverage|wine|sommelier|gm@|manager@/i.test(email)) score += 2;
-  if (/info@|hello@|contact@|support@|reservations@/i.test(email)) score -= 1;
-  if (business) {
-    const firstWord = business.split(' ')[0];
-    if (firstWord && email.includes(firstWord.toLowerCase())) score += 1;
-  }
-  return score;
+function isDeliverableCandidate_(email) {
+  if (!email) return false;
+  const lower = email.toLowerCase();
+  if (lower.includes('mailer-daemon')) return false;
+  if (lower.includes('postmaster')) return false;
+  if (lower === (VNE_EMAIL || '').toLowerCase()) return false;
+  if (lower.endsWith('@gmail.com') && lower.startsWith('no-reply')) return false;
+  return true;
 }
 
-function formatSearchSummary_(attempts) {
-  if (!attempts || !attempts.length) return '';
-  const lines = [];
-  for (let i = 0; i < attempts.length; i++) {
-    const attempt = attempts[i];
-    let line = attempt.source + ': ';
-    if (attempt.emails && attempt.emails.length) {
-      line += attempt.emails.join(', ');
-    } else if (attempt.status) {
-      line += attempt.status;
-    } else {
-      line += 'no result';
-    }
-    lines.push(line);
-  }
-  return lines.join(' | ');
-}
-
-function retryBounceOutreach_(sheet, rowIndex, colIndex, apiKey, email, source) {
-  const result = {
-    success: false,
-    subject: '',
-    error: ''
-  };
-
+function retryBounceOutreach_(sheet, rowIndex, colIndex, apiKey, email, source, business) {
   try {
-    const range = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn());
-    const rowValues = range.getValues()[0];
-    const business = getCell(rowValues, colIndex['Business']) || '';
-    const statusRaw = getCell(rowValues, colIndex['Status']);
-    const lastSent = getCell(rowValues, colIndex['Last Sent At']);
-    const followCt = Number(getCell(rowValues, colIndex['Follow-Up Count']) || 0);
-    const neverSent = !lastSent || normStatus_(statusRaw) === 'error';
-    const eligibleFollowUp = !neverSent && daysSince_(lastSent) >= FOLLOWUP_DAYS && followCt < 1;
-    const isFollowUp = eligibleFollowUp && !neverSent;
+    const rowRange = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn());
+    const rowValues = rowRange.getValues()[0];
 
-    const establishmentType = getEstablishmentTypeSafe(apiKey, business);
-    const insightPayload = getInsightSafe(apiKey, business, establishmentType);
-    const insight = insightPayload.insight;
-    const insightMode = insightPayload.mode;
-    if (insightMode && insightMode !== 'primary') {
-      appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry insight fallback: ' + insightMode);
+    const establishmentTypeCell = getCell(rowValues, colIndex['Establishment Type']);
+    let establishmentType = establishmentTypeCell || '';
+    if (!establishmentType) {
+      establishmentType = getEstablishmentTypeSafe(apiKey, business);
+      sheet.getRange(rowIndex, colIndex['Establishment Type']).setValue(establishmentType);
     }
 
-    const repNotes = generateRepTargetingNotes(apiKey, business, establishmentType, insight);
-    const btgNotes = generateBTGOpportunityNotes(apiKey, business, establishmentType, insight);
-    const emailPayload = generateEmailWithMode_(apiKey, business, insight, establishmentType, isFollowUp);
-    const subject = emailPayload.subject;
-    const html = emailPayload.html;
+    let insight = getCell(rowValues, colIndex['Personalization Insight']) || '';
+    if (!insight) {
+      const insightResult = getInsightSafe(apiKey, business, establishmentType);
+      insight = insightResult.insight;
+      sheet.getRange(rowIndex, colIndex['Personalization Insight']).setValue(insight);
+      if (insightResult.mode && insightResult.mode !== 'primary') {
+        appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry insight fallback used: ' + insightResult.mode);
+      }
+    }
 
-    sendHtmlEmailFromInfoAlias(email, subject, html);
-    result.success = true;
-    result.subject = subject;
+    const emailResult = generateEmailWithMode_(apiKey, {
+      business: business,
+      insight: insight,
+      establishmentType: establishmentType,
+      isFollowUp: false
+    });
+
+    sendHtmlEmailFromInfoAlias(email, emailResult.subject, emailResult.html);
 
     sheet.getRange(rowIndex, colIndex['Email']).setValue(email);
-    sheet.getRange(rowIndex, colIndex['Establishment Type']).setValue(establishmentType);
-    sheet.getRange(rowIndex, colIndex['Personalization Insight']).setValue(insight);
-    sheet.getRange(rowIndex, colIndex['Rep Targeting Notes']).setValue(repNotes);
-    if (btgNotes) sheet.getRange(rowIndex, colIndex['BTG Opportunity Notes']).setValue(btgNotes);
-    sheet.getRange(rowIndex, colIndex['Email Summary']).setValue(subject);
+    sheet.getRange(rowIndex, colIndex['Email Summary']).setValue(emailResult.subject);
     sheet.getRange(rowIndex, colIndex['Last Sent At']).setValue(new Date());
     if (colIndex['Follow-Up Count']) {
-      const nextFollow = isFollowUp ? followCt + 1 : followCt;
-      sheet.getRange(rowIndex, colIndex['Follow-Up Count']).setValue(nextFollow);
+      sheet.getRange(rowIndex, colIndex['Follow-Up Count']).setValue(0);
     }
     setStatusSafe_(sheet, rowIndex, colIndex, 'Follow Up');
-    setRoleByHeuristic_(sheet, rowIndex, colIndex, business, email, establishmentType);
-  } catch (err) {
-    result.error = String(err);
-    try {
-      const range = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn());
-      const rowValues = range.getValues()[0];
-      const business = getCell(rowValues, colIndex['Business']) || '';
-      const fallbackInsight = 'We reviewed your program and think our portfolio could be a great fit for your guests.';
-      const fallbackPayload = safeParseEmailJSON('', business, fallbackInsight, 'establishment');
-      sendHtmlEmailFromInfoAlias(email, fallbackPayload.subject, fallbackPayload.html);
-      sheet.getRange(rowIndex, colIndex['Email Summary']).setValue(fallbackPayload.subject);
-      sheet.getRange(rowIndex, colIndex['Last Sent At']).setValue(new Date());
-      setStatusSafe_(sheet, rowIndex, colIndex, 'Follow Up');
-      setRoleByHeuristic_(sheet, rowIndex, colIndex, business, email, 'establishment');
-      result.success = true;
-      result.subject = fallbackPayload.subject;
-      result.error = '';
-    } catch (fallbackErr) {
-      result.error = 'Primary+fallback failure: ' + String(fallbackErr);
-    }
-  }
+    appendActionNote(sheet, rowIndex, colIndex, 'Bounce retry email sent to ' + email + ' (' + source + ').');
 
-  return result;
+    return {
+      success: true,
+      subject: emailResult.subject,
+      error: ''
+    };
+  } catch (err) {
+    return {
+      success: false,
+      subject: '',
+      error: String(err)
+    };
+  }
 }
